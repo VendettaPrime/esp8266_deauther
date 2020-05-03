@@ -3,14 +3,14 @@
 
 // ===== DISPLAY LIBRARY ===== //
 #include <Wire.h>
-#include <SPI.h>
-#include "SH1106Wire.h"
+//#include <SPI.h>
+//#include "SH1106Wire.h"
 #include "SSD1306Wire.h"
-#include "SH1106Spi.h"
-#include "SSD1306Spi.h"
+//#include "SH1106Spi.h"
+//#include "SSD1306Spi.h"
 // =========================== //
 
-//#define DEFAULT_SSID "pwned"
+#define DEFAULT_SSID "prime"
 //#define HIGHLIGHT_LED 16
 
 // ===================== LED CONFIG ==================== //
@@ -47,7 +47,7 @@
 //   NEO_RGBW    Pixels are wired for RGBW bitstream (NeoPixel RGBW products)
 
 // ===================== DISPLAY CONFIG ==================== //
-#define USE_DISPLAY false // default display setting
+#define USE_DISPLAY true // default display setting
 
 /* = = = = = = = = = = = = = = = = = = = = = = = = = = = = = =
     Adjust the pins to match your setup
