@@ -46,7 +46,7 @@ void stop_rssi_scan() {
         wifi_promiscuous_enable(false);
         data.rssi = false;
 
-        debuglnF("Stopped RSSI scanner");
+        debuglnF("> Stopped RSSI scanner");
         debugln();
     }
 }
@@ -58,4 +58,8 @@ void update_rssi_scan() { /*
                              sysh::set_next_ch(data.channels);
                              data.ch_update_time = current_time;
                              }*/
+}
+
+bool rssi_scan_active() {
+    return rssi_data.enabled;
 }

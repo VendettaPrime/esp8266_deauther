@@ -96,7 +96,7 @@ void Station::print(int id, const result_filter_t* f) {
     if (f) {
         if (ap) {
             if ((((f->channels >> (ap->getChannel()-1)) & 1) == 0)) return;
-            if (!f->ssids.empty() && !f->ssids.contains(ap->getSSID())) return;
+            if (!f->ssids.empty() && !f->ssids.contains(ap->getSSID(),false)) return;
             if (!f->bssids.empty() && !f->bssids.contains(ap->getBSSID())) return;
         } else {
             // IF (no ap) AND (channel filter OR ssid filter OR bssid filter) return;
@@ -105,7 +105,7 @@ void Station::print(int id, const result_filter_t* f) {
             if (!f->bssids.empty()) return;
         }
 
-        if (!f->vendors.empty() && !f->vendors.contains(getVendor())) return;
+        if (!f->vendors.empty() && !f->vendors.contains(getVendor(),false)) return;
     }
 
     debug(strh::right(3, id<0 ? String('-') : String(id)));
@@ -285,21 +285,24 @@ void StationList::printFooter() {
 }
 
 void StationList::print(const result_filter_t* filter) {
-    debugF("Station (Client) List: ");
-    debugln(size());
-    debuglnF("-------------------------");
+    debuglnF("[ ===== Stations ===== ]");
 
-    printHeader();
+    if (size() == 0) {
+        debuglnF("No stations found. Type 'scan st' to search.");
+        debugln();
+    } else {
+        printHeader();
 
-    int i = 0;
-    begin();
+        int i = 0;
+        begin();
 
-    while (available()) {
-        iterate()->print(i, filter);
-        ++i;
+        while (available()) {
+            iterate()->print(i, filter);
+            ++i;
+        }
+
+        printFooter();
     }
-
-    printFooter();
 }
 
 void StationList::printBuffer() {

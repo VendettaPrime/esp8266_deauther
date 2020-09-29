@@ -8,6 +8,10 @@
 
 #include <SimpleCLI.h> // SimpleCLI library
 
+#if SIMPLECLI_VERSION_MAJOR == 1 && SIMPLECLI_VERSION_MINOR < 1
+    #error "Please update SimpleCLI library"
+#endif
+
 #include "debug.h"
 #include "scan.h"
 #include "strh.h"
@@ -18,13 +22,15 @@
 #include "alias.h"
 #include "config.h"
 #include "result_filter.h"
+#include "ap.h"
 
 // ram usage
 extern "C" {
   #include "user_interface.h"
 }
 
-#define CLI_READ_RES()\
+#define CLI_READ_RES(_TEXT)\
+    debuglnF(_TEXT);\
     res = String();\
     while (!read(res));\
     if (res == String(F("exit")) || res == String(F("stop"))) {\
@@ -32,13 +38,29 @@ extern "C" {
         return;\
     }
 
-#define CLI_READ_RES_DEFAULT(_DEFAULT)\
+#define CLI_READ_RES_DEFAULT(_TEXT, _DEFAULT)\
+    debuglnF(_TEXT);\
+    debugF("[default=");\
+    debug(_DEFAULT);\
+    debuglnF("]");\
     res = String();\
     while (!read(res, _DEFAULT));\
-    if (res == String(F("exit")) || res == String(F("stop"))) {\
+    if ((res == String(F("exit"))) || (res == String(F("stop")))) {\
         debuglnF("Ok byeee");\
         return;\
     }
+
+#define CLI_READ_UNTIL(_TEXT, _STOP)\
+    do {\
+        CLI_READ_RES(_TEXT);\
+    }\
+    while (!_STOP);
+
+#define CLI_READ_DEFAULT_UNTIL(_TEXT, _DEFAULT, _STOP)\
+    do {\
+        CLI_READ_RES_DEFAULT(_TEXT, _DEFAULT);\
+    }\
+    while (!_STOP);
 
 void rssi_meter_cb(int8_t rssi) {
     debugln(rssi);
@@ -46,7 +68,9 @@ void rssi_meter_cb(int8_t rssi) {
 
 namespace cli {
     // ===== PRIVATE ===== //
-    SimpleCLI cli;                    // !< Instance of SimpleCLI library
+    SimpleCLI cli { 64, 64 };                    // !< Instance of SimpleCLI library
+
+    unsigned long timer = 0;          // !< Timestamp to wakeup, if sleep command was used
 
 #ifdef ENABLE_HISTORY
     StringList history(HISTORY_SIZE); // !< Command history
@@ -59,21 +83,32 @@ namespace cli {
                 vendor::getRandomMac(mac);
             } else if (str == "broadcast") {
                 memcpy(mac, mac::BROADCAST, 6);
-            } else if (str.length() == 17) {
+            } else {
                 mac::fromStr(str.c_str(), mac);
             }
         }
     }
 
     unsigned long parse_time(const String& str, unsigned long defaultMultiplicator) {
-        unsigned long value = str.toInt();
+        StringList list(str, "+");
 
-        if (value > 0) {
-            if (str.endsWith("ms")) value *= 1;
-            else if (str.endsWith("s") || str.endsWith("sec")) value *= 1000;
-            else if (str.endsWith("m") || str.endsWith("min")) value *= 60*1000;
-            else if (str.endsWith("h")) value *= 60*60*1000;
-            else value *= defaultMultiplicator;
+        list.begin();
+
+        unsigned long value { 0 };
+
+        while (list.available()) {
+            String str { list.iterate() };
+            long   str_value { str.toInt() };
+
+            if (str_value > 0) {
+                if (str.endsWith("ms")) str_value *= 1;
+                else if (str.endsWith("s") || str.endsWith("sec")) str_value *= 1000;
+                else if (str.endsWith("m") || str.endsWith("min")) str_value *= 60*1000;
+                else if (str.endsWith("h")) str_value *= 60*60*1000;
+                else str_value *= defaultMultiplicator;
+
+                value += str_value;
+            }
         }
 
         return value;
@@ -90,14 +125,17 @@ namespace cli {
             String h = values.iterate();
 
             int hyphen = h.indexOf("-", 1);
+
             if ((hyphen >= 0) && (hyphen < h.length()-1)) {
                 int start = h.substring(0, hyphen).toInt();
                 int end   = h.substring(hyphen+1).toInt();
 
+                if (start < 0) start = 0;
+
                 for (int i = start; i<=end; ++i) {
                     list.push(String(i));
                 }
-            } else {
+            } else if ((h.charAt(0) >= '0') && (h.charAt(0) <= '9')) {
                 list.push(String(h.toInt()));
             }
         }
@@ -130,21 +168,6 @@ namespace cli {
 
         debuglnF("\r\nSTARTED \\o/\r\n");
 
-        debuglnF(VERSION);
-
-        debuglnF("\r\n"
-                 "[=================== DISCLAIMER ===================]\r\n"
-                 "  This is a tool.\r\n"
-                 "  It's neither good nor bad.\r\n"
-                 "  Use it to study and test.\r\n"
-                 "  Never use it to create harm or damage!\r\n"
-                 "\r\n"
-                 "  The continuation of this project counts on you!\r\n"
-                 "[==================================================]\r\n");
-
-        debuglnF("Type \"help\" to see all commands.\r\n"
-                 "Type \"start\" to go through the functionalities step by step.");
-
         cli.setOnError([](cmd_error* e) {
             CommandError cmdError(e); // Create wrapper object
 
@@ -159,6 +182,26 @@ namespace cli {
 
             debugln();
         });
+
+        Command cmd_welcome = cli.addCommand("welcome", [](cmd* c) {
+            debuglnF(VERSION);
+
+            debuglnF("\r\n"
+                    "[ ================== DISCLAIMER ================== ]\r\n"
+                    "  This is a tool.\r\n"
+                    "  It's neither good nor bad.\r\n"
+                    "  Use it to study and test.\r\n"
+                    "  Never use it to create harm or damage!\r\n"
+                    "\r\n"
+                    "  The continuation of this project counts on you!\r\n"
+                    "[ ================================================ ]\r\n");
+
+            debuglnF("Type \"help\" to see all commands.\r\n"
+                    "Type \"start\" to go through the functionalities step by step.");
+        });
+        cmd_welcome.setDescription("  Print welcome screen including version and disclaimer");
+
+        cmd_welcome.run();
 
         Command cmd_help = cli.addCommand("help", [](cmd* c) {
             Command cmd(c);
@@ -184,164 +227,141 @@ namespace cli {
         cmd_help.setDescription("  Print the list of commands that you see right now");
 
         Command cmd_start = cli.addCommand("start", [](cmd* c) {
-            String res;
+            Command command { c };
+
+            String res { command.getArg("cmd").getValue() };
             String cmd;
 
             debuglnF("Good morning friend!");
             debugln();
 
             { // Command
-                do {
-                    debuglnF("What can I do for you today?\r\n"
-                             "  scan:    Search for WiFi networks and clients\r\n"
-                             "  ---------\r\n"
-                             "  beacon:  Send WiFi network advertisement beacons (spam network scanners)\r\n"
-                             "  deauth:  Disrupt WiFi connections\r\n"
-                             "  probe:   Send WiFi network requests (spam client scanners)\r\n"
-                             "  ---------\r\n"
-                             "  alias:   Give MAC addresses an alias\r\n"
-                             "  results: Display and filter scan results\r\n"
-                             "Remember that you can always escape by typing 'exit'");
-                    CLI_READ_RES();
-                } while (!(res == "scan" || res == "beacon" || res == "deauth" || res == "probe" || res == "alias" || res == "results"));
+                while (!(res == "scan" || res == "beacon" || res == "deauth" || res == "probe" || res == "alias" || res == "results")) {
+                    CLI_READ_RES("What can I do for you today?\r\n"
+                                 "  scan:    Search for WiFi networks and clients\r\n"
+                                 "  ---------\r\n"
+                                 "  beacon:  Send WiFi network advertisement beacons (spam network scanners)\r\n"
+                                 "  deauth:  Disrupt WiFi connections\r\n"
+                                 "  probe:   Send WiFi network requests (spam client scanners)\r\n"
+                                 "  ---------\r\n"
+                                 "  alias:   Give MAC addresses an alias\r\n"
+                                 "  results: Display and filter scan results\r\n"
+                                 "Remember that you can always escape by typing 'stop'");
+                }
                 cmd += res;
             }
 
             if (res == "scan") {
                 { // Scan mode
-                    do {
-                        debuglnF("What do you wish to scan for?\r\n"
-                                 "  ap:    Access points (WiFi networks)\r\n"
-                                 "  st:    Stations (WiFi client devices)\r\n"
-                                 "  ap+st: Access points and stations\r\n"
-                                 " [default=ap+st]");
-                        CLI_READ_RES_DEFAULT("ap+st");
-                    } while (!(res == "ap" || res == "st" || res == "ap+st"));
-                    if (res != "ap+st") cmd += " -m " + res;
+                    CLI_READ_DEFAULT_UNTIL("What do you wish to scan for?\r\n"
+                                           "  ap:    Access points (WiFi networks)\r\n"
+                                           "  st:    Stations (WiFi client devices)\r\n"
+                                           "  ap+st: Access points and stations",
+                                           "ap+st",
+                                           (res == "ap" || res == "st" || res == "ap+st"));
+                    if (cmd != "ap+st") cmd += " -m " + res;
                 }
 
                 // Scan time and channel(s)
                 if (res != "ap") {
                     { // Scan time
-                        do {
-                            debuglnF("Scan for how long?\r\n"
-                                     "  >1: Station scan time\r\n"
-                                     " [default=20s]");
-                            CLI_READ_RES_DEFAULT("20");
-                        } while (!(res.toInt() > 0));
+                        CLI_READ_DEFAULT_UNTIL("Scan for how long?\r\n"
+                                               "  >1: Station scan time",
+                                               "20",
+                                               (res.toInt() > 0));
                         if (res != "20") cmd += " -t " + res;
                     }
 
                     { // Scan on channel(s)
-                        debuglnF("Scan on wich channel(s)?\r\n"
-                                 "  1-14: WiFi channel(s) to search on (for example: 1,6,11)\r\n"
-                                 " [default=all]");
-                        CLI_READ_RES_DEFAULT("all");
+                        CLI_READ_RES_DEFAULT("Scan on which channel(s)?\r\n"
+                                             "  1-14: WiFi channel(s) to search on (for example: 1,6,11)",
+                                             "all");
                         if ((res != "all") && (res != "1-14")) cmd += " -ch " + res;
                     }
 
                     { // Channel scan time
-                        do {
-                            debuglnF("Stay on each channel for how long?\r\n"
-                                     "  >1: Channel time in milliseconds\r\n"
-                                     " [default=284]");
-                            CLI_READ_RES_DEFAULT("284");
-                        } while (!(res.toInt() > 0) && res != "284");
+                        CLI_READ_DEFAULT_UNTIL("Stay on each channel for how long?\r\n"
+                                               "  >1: Channel time in milliseconds",
+                                               "284",
+                                               (res.toInt() > 0));
                         if (res != "284") cmd += " -ct " + res;
                     }
                 }
 
                 { // Retain scan results
-                    do {
-                        debuglnF("Keep previous scan results?\r\n"
-                                 "  y: Yes\r\n"
-                                 "  n: No\r\n"
-                                 " [default=n]");
-                        CLI_READ_RES_DEFAULT("n");
-                    } while (!(res == String('y') || res == String('n')));
+                    CLI_READ_DEFAULT_UNTIL("Keep previous scan results?\r\n"
+                                           "  y: Yes\r\n"
+                                           "  n: No",
+                                           "n",
+                                           (res == String('y') || res == String('n')));
                     if (res == String('y')) cmd += " -r";
                 }
             } else if (res == "beacon") {
                 { // SSIDs
-                    debuglnF("Which network names do you wish to advertise?\r\n"
-                             "  for example: \"network A\",\"network B\"");
-                    CLI_READ_RES();
+                    CLI_READ_RES("Which network names do you wish to advertise?\r\n"
+                                 "  for example: \"network A\",\"network B\"");
                     cmd += " -ssid " + strh::escape(res);
                 }
 
                 { // BSSID
-                    do {
-                        debuglnF("What is the transmitter or sender address? (BSSID)\r\n"
-                                 "  MAC address: for example '00:20:91:aa:bb:5c\r\n"
-                                 "  random:      generate random MAC address\r\n"
-                                 " [default=random]");
-                        CLI_READ_RES_DEFAULT("random");
-                    } while (!(res.length() == 17 || res == "random"));
+                    CLI_READ_DEFAULT_UNTIL("What is the transmitter or sender address? (BSSID)\r\n"
+                                           "  MAC address: for example '00:20:91:aa:bb:5c\r\n"
+                                           "  random:      generate random MAC address",
+                                           "random",
+                                           (res.length() == 17 || res == "random"));
                     if (res != "random") cmd += " -from " + res;
                 }
 
                 { // Receiver
-                    do {
-                        debuglnF("What is the receiver address?\r\n"
-                                 "  MAC address: for example 00:20:91:aa:bb:5cc\r\n"
-                                 "  broadcast:   send to everyone\r\n"
-                                 " [default=broadcast]");
-                        CLI_READ_RES_DEFAULT("broadcast");
-                    } while (!(res.length() == 17 || res == "broadcast"));
+                    CLI_READ_DEFAULT_UNTIL("What is the receiver address?\r\n"
+                                           "  MAC address: for example 00:20:91:aa:bb:5cc\r\n"
+                                           "  broadcast:   send to everyone",
+                                           "broadcast",
+                                           (res.length() == 17 || res == "broadcast"));
                     if (res != "broadcast") cmd += " -to " + res;
                 }
 
                 { // Encryption
-                    do {
-                        debuglnF("What encryption should it use?\r\n"
-                                 "  open: no encryption, an open network without a password\r\n"
-                                 "  wpa2: WPA2 protected network\r\n"
-                                 " [default=open]");
-                        CLI_READ_RES_DEFAULT("open");
-                    } while (!(res == "open" || res == "wpa2"));
+                    CLI_READ_DEFAULT_UNTIL("What encryption should it use?\r\n"
+                                           "  open: no encryption, an open network without a password\r\n"
+                                           "  wpa2: WPA2 protected network",
+                                           "open",
+                                           (res == "open" || res == "wpa2"));
                     if (res != "open") cmd += " -enc " + res;
                 }
 
                 { // Channels
-                    do {
-                        debuglnF("Which channel(s) should be used?\r\n"
-                                 "  1-14: WiFi channel to send packets on\r\n"
-                                 " [default=1]");
-                        CLI_READ_RES_DEFAULT("1");
-                    } while (!(res.toInt() >= 1 && res.toInt() <= 14));
+                    CLI_READ_DEFAULT_UNTIL("Which channel(s) should be used?\r\n"
+                                           "  1-14: WiFi channel to send packets on",
+                                           "1",
+                                           (res.toInt() >= 1 && res.toInt() <= 14));
                     if (res != "1") cmd += " -ch " + res;
                 }
 
                 { // Time
-                    do {
-                        debuglnF("How long should the attack last?\r\n"
-                                 "   0: Infinite\r\n"
-                                 "  >0: Stop after x seconds\r\n"
-                                 " [default=300]");
-                        CLI_READ_RES_DEFAULT("300");
-                    } while (!(res.toInt() >= 0));
+                    CLI_READ_DEFAULT_UNTIL("How long should the attack last?\r\n"
+                                           "   0: Infinite\r\n"
+                                           "  >0: Stop after x seconds",
+                                           "300",
+                                           (res.toInt() >= 0));
                     if (res != "300") cmd += " -t " + res;
                 }
 
                 { // Scan
-                    do {
-                        debuglnF("Scan for authentication requests?\r\n"
-                                 "  y: Yes\r\n"
-                                 "  n: No\r\n"
-                                 " [default=n]");
-                        CLI_READ_RES_DEFAULT("n");
-                    } while (!(res == String('y') || res == String('n')));
+                    CLI_READ_DEFAULT_UNTIL("Scan for authentication requests?\r\n"
+                                           "  y: Yes\r\n"
+                                           "  n: No",
+                                           "n",
+                                           (res == String('y') || res == String('n')));
                     if (res == String('y')) cmd += " -scan";
                 }
             } else if (res == "deauth") {
                 { // Target
-                    do {
-                        debuglnF("What do you want to deauthenticate?\r\n"
-                                 "  ap:  a network\r\n"
-                                 "  st:  a client device\r\n"
-                                 "  mac: enter MAC addresses manually");
-                        CLI_READ_RES();
-                    } while (!(res == "ap" || res == "st" || res == "mac"));
+                    CLI_READ_UNTIL("What do you want to deauthenticate?\r\n"
+                                   "  ap:  a network\r\n"
+                                   "  st:  a client device\r\n"
+                                   "  mac: enter MAC addresses manually",
+                                   (res == "ap" || res == "st" || res == "mac"));
                     cmd += " -"+res;
 
                     if (res == "ap") {
@@ -350,12 +370,17 @@ namespace cli {
                                      "Type 'scan -m ap' to search for access points");
                             return;
                         }
-                        scan::printAPs();
 
-                        debuglnF("Select access point(s) to attack\r\n"
-                                 "  >=0: ID(s) to select for the attack");
-                        CLI_READ_RES();
+                        result_filter_t filter;
 
+                        filter.channels = 0x3FFF;
+                        filter.aps      = true;
+                        filter.sts      = false;
+
+                        scan::print(&filter);
+
+                        CLI_READ_RES("Select access point(s) to attack\r\n"
+                                     "  >=0: ID(s) to select for the attack");
                         cmd += " "+res;
                     } else if (res == "st") {
                         if (scan::getStations().size() == 0) {
@@ -363,29 +388,32 @@ namespace cli {
                                      "Type 'scan -m st' to search for stations");
                             return;
                         }
-                        scan::printSTs();
 
-                        debuglnF("Select station(s) to attack\r\n"
-                                 "  >=0: ID(s) to select for the attack");
-                        CLI_READ_RES();
+                        result_filter_t filter;
+
+                        filter.channels = 0x3FFF;
+                        filter.aps      = false;
+                        filter.sts      = true;
+
+                        scan::print(&filter);
+
+                        CLI_READ_RES("Select station(s) to attack\r\n"
+                                     "  >=0: ID(s) to select for the attack");
 
                         cmd += " "+res;
                     } else if (res == "mac") {
-                        debuglnF("Target(s) to attack\r\n"
-                                 "  Sender-Receiver-Channel for example:'aa:bb:cc:dd:ee:ff-00:11:22:33:44:55-7'");
-                        CLI_READ_RES();
+                        CLI_READ_RES("Target(s) to attack\r\n"
+                                     "  Sender-Receiver-Channel for example:'aa:bb:cc:dd:ee:ff-00:11:22:33:44:55-7'");
 
                         cmd += " "+res;
                     }
                 }
 
                 { // Noob filer
-                    do {
-                        debuglnF("Do you own or have permission to attack the selected devices?\r\n"
-                                 "  yes\r\n"
-                                 "  no");
-                        CLI_READ_RES();
-                    } while (!(res == "yes" || res == "no"));
+                    CLI_READ_UNTIL("Do you own or have permission to attack the selected devices?\r\n"
+                                   "  yes\r\n"
+                                   "  no",
+                                   (res == "yes" || res == "no"));
                     if (res == "no") {
                         debuglnF("Then you should not attack them.\r\n"
                                  "It could get you in serious trouble.\r\n"
@@ -395,125 +423,161 @@ namespace cli {
                 }
 
                 { // Time
-                    do {
-                        debuglnF("How long should the attack last?\r\n"
-                                 "   0: Infinite\r\n"
-                                 "  >0: Stop after x seconds\r\n"
-                                 " [default=300]");
-                        CLI_READ_RES_DEFAULT("300");
-                    } while (!(res.toInt() >= 0));
+                    CLI_READ_DEFAULT_UNTIL("How long should the attack last?\r\n"
+                                           "   0: Infinite\r\n"
+                                           "  >0: Stop after x seconds",
+                                           "300",
+                                           (res.toInt() >= 0));
                     if (res != "300") cmd += " -t " + res;
                 }
 
                 { // Number of packets
-                    do {
-                        debuglnF("How many packets shall be sent?\r\n"
-                                 "   0: Infinite\r\n"
-                                 "  >0: Send x packets\r\n"
-                                 " [default=0]");
-                        CLI_READ_RES_DEFAULT("0");
-                    } while (!(res.toInt() >= 0));
+                    CLI_READ_DEFAULT_UNTIL("How many packets shall be sent?\r\n"
+                                           "   0: Infinite\r\n"
+                                           "  >0: Send x packets",
+                                           "0",
+                                           (res.toInt() >= 0));
                     if (res != "0") cmd += " -n " + res;
                 }
 
                 { // Packet rate
-                    do {
-                        debuglnF("At which speed/rate?\r\n"
-                                 "  >0 : Packets per second\r\n"
-                                 " [default=20]");
-                        CLI_READ_RES_DEFAULT("20");
-                    } while (!(res.toInt() > 0));
+                    CLI_READ_DEFAULT_UNTIL("At which speed/rate?\r\n"
+                                           "  >0 : Packets per second",
+                                           "20",
+                                           (res.toInt() > 0));
                     if (res != "20") cmd += " -r " + res;
                 }
 
                 { // Mode
-                    do {
-                        debuglnF("What kind of packets shall be sent?\r\n"
-                                 "  deauth:          Deauthentication\r\n"
-                                 "  disassoc:        Disassociation\r\n"
-                                 "  deauth+disassoc: Both\r\n"
-                                 " [default=deauth+disassoc]");
-                        CLI_READ_RES_DEFAULT("deauth+disassoc");
-                    } while (!(res == "deauth" || res == "disassoc" || res == "deauth+disassoc"));
+                    CLI_READ_DEFAULT_UNTIL("What kind of packets shall be sent?\r\n"
+                                           "  deauth:          Deauthentication\r\n"
+                                           "  disassoc:        Disassociation\r\n"
+                                           "  deauth+disassoc: Both",
+                                           "deauth+disassoc",
+                                           (res == "deauth" || res == "disassoc" || res == "deauth+disassoc"));
                     if (res != "deauth+disassoc") cmd += " -m " + res;
                 }
             } else if (res == "probe") {
                 { // SSIDs
-                    debuglnF("Which network names do you wish to request for?\r\n"
-                             "  for example: \"network A\",\"network B\"");
-                    CLI_READ_RES();
+                    CLI_READ_RES("Which network names do you wish to request for?\r\n"
+                                 "  for example: \"network A\",\"network B\"");
                     cmd += " -ssid " + strh::escape(res);
                 }
 
                 { // Receiver
-                    do {
-                        debuglnF("What is the receiver address?\r\n"
-                                 "  MAC address: for example 00:20:91:aa:bb:5c\r\n"
-                                 "  broadcast:   send to everyone\r\n"
-                                 " [default=broadcast]");
-                        CLI_READ_RES_DEFAULT("broadcast");
-                    } while (!(res.length() == 17 || res == "broadcast"));
+                    CLI_READ_DEFAULT_UNTIL("What is the receiver address?\r\n"
+                                           "  MAC address: for example 00:20:91:aa:bb:5c\r\n"
+                                           "  broadcast:   send to everyone",
+                                           "broadcast",
+                                           (res.length() == 17 || res == "broadcast"));
                     if (res != "broadcast") cmd += " -to " + res;
                 }
 
                 { // Channel
-                    do {
-                        debuglnF("Which channel(s) should be used?\r\n"
-                                 "  1-14: WiFi channel to send packets on\r\n"
-                                 " [default=1]");
-                        CLI_READ_RES_DEFAULT("1");
-                    } while (!(res.toInt() >= 1 && res.toInt() <= 14));
-                    if (res != "1") cmd += " -ch " + res;
+                    CLI_READ_DEFAULT_UNTIL("Which channel(s) should be used?\r\n"
+                                           "  1-14: WiFi channel to send packets on",
+                                           "1",
+                                           (res.toInt() >= 1 && res.toInt() <= 14));
+                    if (res != String(1)) cmd += " -ch " + res;
                 }
 
                 { // Time
-                    do {
-                        debuglnF("How long should the attack last?\r\n"
-                                 "   0: Infinite\r\n"
-                                 "  >0: Stop after x seconds\r\n"
-                                 " [default=300]");
-                        CLI_READ_RES_DEFAULT("300");
-                    } while (!(res.toInt() >= 0));
-                    if (res != "300") cmd += " -t " + res;
+                    CLI_READ_DEFAULT_UNTIL("How long should the attack last ?\r\n"
+                                           "   0: Infinite\r\n"
+                                           "  >0: Stop after x seconds",
+                                           "300",
+                                           (res.toInt() >= 0));
+                    if (res != String(300)) cmd += " -t " + res;
                 }
             } else if (res == "alias") {
                 { // Mode
-                    do {
-                        debuglnF("Do you want to set a new alias, remove one or see the entire list?\r\n"
-                                 "  list:   Print list of existing MAC address aliases\r\n"
-                                 "  add:    Add new MAC address alias to list\r\n"
-                                 "  remove: Remove an exisiting MAC address alias\r\n"
-                                 " [default=list]");
-                        CLI_READ_RES_DEFAULT("list");
-                    } while (!(res == "list" || res == "add" || res == "remove"));
+                    CLI_READ_DEFAULT_UNTIL("Do you want to set a new alias, remove one or see the entire list ?\r\n"
+                                           "  list:   Print list of existing MAC address aliases\r\n"
+                                           "  add:    Add new MAC address alias to list\r\n"
+                                           "  remove: Remove an exisiting MAC address alias\r\n"
+                                           "  clear:  Remove all saved aliases",
+                                           "list",
+                                           (res == "list" || res == "add" || res == "remove" || res == "clear"));
                     if (res != "list") cmd += " -mode " + res;
                 }
 
-                if (res != "list") {
-                    { // Name
-                        debuglnF("Alias (name):");
-                        CLI_READ_RES();
+                // Add
+                if (res == "add") {
+                    CLI_READ_DEFAULT_UNTIL("Selector:\r\n"
+                                           "  mac: Enter MAC address manually\r\n"
+                                           "  ap:  Use the BSSID of an access point\r\n"
+                                           "  st:  Use the MAC of a station",
+                                           "mac",
+                                           (res == "mac" || res == "ap" || res == "st"));
 
+                    { // Name
+                        if (res == "mac") {
+                            CLI_READ_UNTIL("Enter a valid MAC address:",
+                                           (mac::valid(res.c_str(), res.length())));
+                            cmd += " " + res.substring(0, 17);
+                        }
+
+                        else if (res == "ap") {
+                            if (scan::getAccessPoints().size() == 0) {
+                                debuglnF("ERROR: No access points in scan results.\r\n"
+                                         "Type 'scan -m ap' to search for access points");
+                                return;
+                            }
+
+                            result_filter_t filter;
+
+                            filter.channels = 0x3FFF;
+                            filter.aps      = false;
+                            filter.sts      = true;
+
+                            scan::print(&filter);
+
+                            CLI_READ_UNTIL("Enter access point ID:",
+                                           (res.toInt() >= 0));
+                            cmd += " -ap " + res;
+                        }
+
+                        else if (res == "st") {
+                            if (scan::getStations().size() == 0) {
+                                debuglnF("ERROR: No stations in scan results.\r\n"
+                                         "Type 'scan -m st' to search for stations");
+                                return;
+                            }
+
+                            result_filter_t filter;
+
+                            filter.channels = 0x3FFF;
+                            filter.aps      = false;
+                            filter.sts      = true;
+
+                            scan::print(&filter);
+
+                            CLI_READ_UNTIL("Enter station ID:",
+                                           (res.toInt() >= 0));
+                            cmd += " -st " + res;
+                        }
+                    }
+
+                    { // Name
+                        CLI_READ_RES("Alias name:");
                         if (res.length() > 0) cmd += " -name " + strh::escape(res);
                     }
+                }
 
-                    { // MAC
-                        debuglnF("MAC address:");
-                        CLI_READ_RES();
-
-                        if (res.length() > 0) cmd += " -mac " + res;
-                    }
+                // Remove
+                else if (res == "remove") {
+                    alias::print();
+                    CLI_READ_RES("Enter ID, name or MAC address of alias you want to remove:");
+                    cmd += " " + res;
                 }
             } else if (res == "results") {
                 { // Type
-                    do {
-                        debuglnF("Filter type of results:\r\n"
-                                 "  ap:    Access points (WiFi networks)\r\n"
-                                 "  st:    Stations (WiFi client devices)\r\n"
-                                 "  ap+st: Access points and stations\r\n"
-                                 " [default=ap+st]");
-                        CLI_READ_RES_DEFAULT("ap+st");
-                    } while (!(res == "ap" || res == "st" || res == "ap+st"));
+                    CLI_READ_DEFAULT_UNTIL("Filter type of results:\r\n"
+                                           "  ap:    Access points(WiFi networks)\r\n"
+                                           "  st:    Stations(WiFi client devices)\r\n"
+                                           "  ap+st: Access points and stations",
+                                           "ap+st",
+                                           (res == "ap" || res == "st" || res == "ap+st"));
                     if (res != "ap+st") cmd += " -t " + res;
 
                     if ((res == "ap") && (scan::getAccessPoints().size() == 0)) {
@@ -532,53 +596,46 @@ namespace cli {
                 }
 
                 { // Channel(s)
-                    debuglnF("Filter channel(s):\r\n"
-                             "  1-14: WiFi channel(s) to search on (for example: 1,6,11)\r\n"
-                             " [default=all]");
-                    CLI_READ_RES_DEFAULT("all");
-                    if ((res != "all") && (res != "1-14")) cmd += " -ch " + res;
+                    CLI_READ_RES_DEFAULT("Filter channel(s):\r\n"
+                                         "  1-14: WiFi channel(s) to search on(for example: 1, 6, 11)",
+                                         "all");
+                    if ((res != "all ") && (res != " 1-14 ")) cmd += " -ch " + res;
                 }
 
                 { // SSIDs
-                    debuglnF("Filter for SSIDs (network names):\r\n"
-                             "  for example: \"network A\",\"network B\"\r\n"
-                             " [default=*No filter*]");
-                    CLI_READ_RES_DEFAULT("");
+                    CLI_READ_RES_DEFAULT("Filter for SSIDs(network names):\r\n"
+                                         "  for example: \"network A\",\"network B\"",
+                                         "");
                     if (res.length() > 0) cmd += " -ssid " + strh::escape(res);
                 }
 
                 { // BSSID
-                    debuglnF("Filter for BSSID (MAC address of access point):\r\n"
-                             "  for example 00:20:91:aa:bb:5cc\r\n"
-                             " [default=*No filter*]");
-                    CLI_READ_RES_DEFAULT("");
+                    CLI_READ_RES_DEFAULT("Filter for BSSID (MAC address of access point):\r\n"
+                                         "  for example 00:20:91:aa:bb:5cc",
+                                         "");
                     if (res.length() > 0) cmd += " -bssid " + res;
                 }
 
                 { // Vendor
-                    debuglnF("Filter for vendor name:\r\n"
-                             "  for example \"Apple\",\"Intel\"\r\n"
-                             " [default=*No filter*]");
-                    CLI_READ_RES_DEFAULT("");
+                    CLI_READ_RES_DEFAULT("Filter for vendor name:\r\n"
+                                         "  for example \"Apple\",\"Intel\"",
+                                         "");
                     if (res.length() > 0) cmd += " -vendor " + strh::escape(res);
                 }
             }
 
 
             // Result
-            for (int i = 0; i<cmd.length()+4 || i<21; ++i) debug('#');
-            debugln();
-            debuglnF("Exiting start command");
-
-            for (int i = 0; i<cmd.length()+4 || i<21; ++i) debug('#');
-            debugln();
+            debuglnF("> Exiting start command");
 
             debugln();
             debugF("# ");
             debugln(cmd);
+            debugln();
 
             cli::parse(cmd.c_str());
         });
+        cmd_start.addPosArg("cmd", "");
         cmd_start.setDescription("  Start a guided tour through the functions of this device");
 
         Command cmd_scan = cli.addCommand("scan", [](cmd* c) {
@@ -610,14 +667,16 @@ namespace cli {
 
             { // Mode
                 String mode = cmd.getArg("m").getValue();
+
+                ap = false;
+                st = false;
+
                 if (mode == "ap+st") {
                     ap = true;
                     st = true;
                 } else if (mode == "ap") {
                     ap = true;
-                    st = false;
                 } else if (mode == "st") {
-                    ap = false;
                     st = true;
                 }
             }
@@ -742,15 +801,10 @@ namespace cli {
             filter.ssids.parse(ssid_str);
             filter.bssids.parse(bssid_str);
             filter.vendors.parse(vendor_str);
+            filter.aps = (mode == "ap") || (mode == "ap+st");
+            filter.sts = (mode == "st") || (mode == "ap+st");
 
-            if (mode == "ap") {
-                scan::printAPs(&filter);
-            } else if (mode == "st") {
-                scan::printSTs(&filter);
-            } else if (mode == "ap+st") {
-                scan::printAPs(&filter);
-                scan::printSTs(&filter);
-            }
+            scan::print(&filter);
         });
         cmd_results.addPosArg("t/ype", "ap+st");
         cmd_results.addArg("ch/annel/s", "all");
@@ -808,8 +862,8 @@ namespace cli {
                 beacon_settings.timeout = parse_time(time_str, 1000);
             }
 
-            { // Scan
-                beacon_settings.scan = cmd.getArg("scan").isSet();
+            { // Monitor connection tries
+                beacon_settings.scan = cmd.getArg("m").isSet();
             }
 
             { // Save
@@ -824,7 +878,7 @@ namespace cli {
         cmd_beacon.addPosArg("enc/ryption", "open");
         cmd_beacon.addArg("ch/annel", "1");
         cmd_beacon.addArg("r/ate", "10");
-        cmd_beacon.addFlagArg("scan,auth,mon/itor");
+        cmd_beacon.addFlagArg("auth,m/on/itor");
         cmd_beacon.addFlagArg("save");
         cmd_beacon.addArg("t/ime/out", "5min");
         cmd_beacon.setDescription(
@@ -835,7 +889,7 @@ namespace cli {
             "  -enc:  encryption [open,wpa2] (default=open)\r\n"
             "  -ch:   2.4 GHz channel(s) [1-14] (default=1)\r\n"
             "  -r:    packets per second per SSID (default=10)\r\n"
-            "  -mon:  scan for authentications\r\n"
+            "  -m:    scan for authentications\r\n"
             "  -save: save probe requests from auth. scan\r\n"
             "  -t:    attack timeout (default=5min)"
             );
@@ -847,25 +901,39 @@ namespace cli {
 
             { // Read Access Point MACs
                 String ap_str { cmd.getArg("ap").getValue() };
-                SortedStringList list = parse_int_list(ap_str);
-
-                TargetArr ap_targets { list.size() };
+                SortedStringList list { ap_str };
+                AccessPointList& aps = scan::getAccessPoints();
+                TargetArr ap_targets { aps.size() };
 
                 list.begin();
 
-                int id;
-                AccessPoint* ap;
-
                 while (list.available()) {
-                    id = list.iterate().toInt();
-                    ap = scan::getAccessPoints().get(id);
+                    String value { list.iterate() };
+                    SortedStringList ids { parse_int_list(value) };
+                    uint8_t mac[6];
+                    AccessPoint* ap;
 
-                    if (ap) {
-                        const uint8_t* sender { ap->getBSSID() };
-                        const uint8_t* receiver { mac::BROADCAST };
-                        uint16_t channels = 1 << (ap->getChannel()-1);
+                    if (alias::resolve(value, mac)) { // MAC address (or alias)
+                        ap = aps.search(mac);
+                        ap_targets.add(ap);
+                    } else if (ids.size() > 0) {      // ID(s)
+                        int id;
+                        ids.begin();
 
-                        ap_targets.add(sender, receiver, channels);
+                        while (ids.available()) {
+                            id = ids.iterate().toInt();
+                            ap = aps.get(id);
+                            ap_targets.add(ap);
+                        }
+                    } else { // SSID
+                        aps.begin();
+
+                        while (aps.available()) {
+                            ap = aps.iterate();
+                            if (String(ap->getSSID()) == value) {
+                                ap_targets.add(ap);
+                            }
+                        }
                     }
                 }
 
@@ -874,29 +942,37 @@ namespace cli {
 
             { // Read Station MACs
                 String st_str { cmd.getArg("st").getValue() };
-                SortedStringList list = parse_int_list(st_str);
-
-                TargetArr st_targets { list.size() };
+                SortedStringList list { st_str };
+                StationList& sts = scan::getStations();
+                TargetArr st_targets { sts.size() };
 
                 list.begin();
-                int id;
-                Station* st;
 
                 while (list.available()) {
-                    id = list.iterate().toInt();
-                    st = scan::getStations().get(id);
+                    String value { list.iterate() };
+                    SortedStringList ids { parse_int_list(value) };
+                    uint8_t mac[6];
+                    Station* st;
 
-                    if (st) {
-                        if (st->getAccessPoint()) {
-                            const uint8_t* sender   { st->getAccessPoint()->getBSSID() };
-                            const uint8_t* receiver { st->getMAC() };
-                            uint16_t channels = 1 << (st->getAccessPoint()->getChannel()-1);
-
-                            st_targets.add(sender, receiver, channels);
-                        } else {
+                    if (alias::resolve(value, mac)) { // MAC address (or alias)
+                        st = sts.search(mac);
+                        if (!st_targets.add(st)) {
                             debugF("WARNING: Station ");
-                            debug(id);
-                            debuglnF(" is not connected to an AP, therefor can't be deauthed.");
+                            debug(value);
+                            debuglnF(" not found, not connected to an AP or already in list.");
+                        }
+                    } else if (ids.size() > 0) { // ID(s)
+                        int id;
+                        ids.begin();
+
+                        while (ids.available()) {
+                            id = ids.iterate().toInt();
+                            st = sts.get(id);
+                            if (!st_targets.add(st)) {
+                                debugF("WARNING: Station ");
+                                debug(id);
+                                debuglnF(" not found, not connected to an AP or already in list.");
+                            }
                         }
                     }
                 }
@@ -1038,10 +1114,25 @@ namespace cli {
         Command cmd_alias = cli.addCommand("alias", [](cmd* c) {
             Command cmd(c);
 
-            String mode { cmd.getArg("mode").getValue() };
+            Argument arg_mac { cmd.getArg("mac") };
+            Argument arg_ap { cmd.getArg("ap") };
+            Argument arg_st { cmd.getArg("st") };
 
+            String mode { cmd.getArg("mode").getValue() };
             String name { cmd.getArg("name").getValue() };
-            String mac_str { cmd.getArg("mac").getValue() };
+            String mac_str;
+
+            if (arg_mac.isSet()) {
+                mac_str = arg_mac.getValue();
+            } else if (arg_ap.isSet()) {
+                int id { arg_ap.getValue().toInt() };
+                AccessPoint* ap { scan::getAccessPoints().get(id) };
+                if (ap) mac_str = ap->getBSSIDString();
+            } else if (arg_st.isSet()) {
+                int id = arg_st.getValue().toInt();
+                Station* st { scan::getStations().get(id) };
+                if (st) mac_str = st->getMACString();
+            }
 
             if (mode == "list") {
                 alias::print();
@@ -1050,11 +1141,12 @@ namespace cli {
 
             else if (mode == "add") {
                 // No valid mac? Try switching arg values!
-                if ((mac_str.length() != 17) || (mac_str.charAt(2) != ':')) {
+                if (!mac::valid(mac_str.c_str(), mac_str.length())) {
                     String tmp = name;
                     name       = mac_str;
                     mac_str    = tmp;
                 }
+
                 uint8_t mac[6] = { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
                 parse_mac(mac_str, mac);
 
@@ -1066,7 +1158,7 @@ namespace cli {
                     debuglnF(" saved");
                 } else {
                     debuglnF("Something went wrong :(");
-                    debuglnF("Invalid MAC address or already in list");
+                    debuglnF("Name or address already in list or invalid");
                 }
                 return;
             }
@@ -1088,21 +1180,30 @@ namespace cli {
                 return;
             }
 
+            else if (mode == "clear") {
+                alias::clear();
+                debuglnF("Cleared alias list");
+            }
+
             else {
                 debugF("Unknown mode \"");
                 debug(mode);
                 debuglnF("\".");
-                debuglnF("Try \"alias list\", \"alias add [...]\" or \"alias remove [...]\".");
+                debuglnF("Try \"alias list\", \"alias add [...]\", \"alias remove [...]\" or \"alias clear\".");
             }
         });
         cmd_alias.addPosArg("m/ode", "list");
         cmd_alias.addPosArg("name", "");
         cmd_alias.addPosArg("mac", "");
+        cmd_alias.addArg("ap", "");
+        cmd_alias.addArg("st", "");
         cmd_alias.setDescription(
             "  Manage alias for MAC address\r\n"
-            "  -mode: add,remove or list (default=list)\r\n"
+            "  -mode: list,add,remove or clear (default=list)\r\n"
             "  -name: alias name\r\n"
-            "  -mac:  MAC address");
+            "  -mac:  MAC address\r\n"
+            "  -ap:   access point ID\r\n"
+            "  -st:   station ID");
 
         Command cmd_clear = cli.addCommand("clear", [](cmd* c) {
             for (uint8_t i = 0; i<100; ++i) {
@@ -1136,8 +1237,9 @@ namespace cli {
             String mode_str { cmd.getArg("mode").getValue() };
 
             if (mode_str == "all") {
-                scan::stop();
+                ap::stop();
                 attack::stop();
+                scan::stop();
             } else {
                 SortedStringList mode_list { mode_str };
                 mode_list.begin();
@@ -1157,13 +1259,15 @@ namespace cli {
                         attack::stopDeauth();
                     } else if (mode == "probe") {
                         attack::stopProbe();
+                    } else if (mode == "ap") {
+                        ap::stop();
                     }
                 }
             }
         });
         cmd_stop.addPosArg("mode", "all");
         cmd_stop.setDescription("  Stop scans or attacks\r\n"
-                                "  -mode: all,scan,auth,attack,beacon,deauth,probe (default=all)");
+                                "  -mode: all,scan,auth,attack,beacon,deauth,probe,ap (default=all)");
 
 #ifdef ENABLE_HISTORY
         Command cmd_history = cli.addCommand("history", [](cmd* c) {
@@ -1251,19 +1355,19 @@ namespace cli {
             Command cmd(c);
 
             String input { cmd.getArg("mac").getValue() };
-            bool substring { cmd.getArg("similar").isSet() };
+            bool exact { cmd.getArg("e").isSet() };
+
+            uint8_t mac[3];
 
             debuglnF("MAC      Vendor");
             debuglnF("=================");
 
-            if (mac::valid(input.c_str(), input.length(), 3)) {
-                uint8_t mac[3];
-                mac::fromStr(input.c_str(), mac, 3);
+            if (alias::resolve(input, mac, 3)) {
                 debug(strh::mac(mac, 3));
                 debug(' ');
                 debugln(vendor::getName(mac));
             } else {
-                vendor::getMAC(input, substring, [](const uint8_t* mac, const char* name) {
+                vendor::getMAC(input, !exact, [](const uint8_t* mac, const char* name) {
                     debug(strh::mac(mac, 3));
                     debug(' ');
                     debugln(name);
@@ -1272,10 +1376,51 @@ namespace cli {
             debuglnF("=================");
         });
         cmd_vendor.addPosArg("mac");
-        cmd_vendor.addFlagArg("s/imilar");
+        cmd_vendor.addFlagArg("e/xact");
         cmd_vendor.setDescription("  Vendor (manufacturer) lookup\r\n"
                                   "  -mac: MAC address(es)\r\n"
-                                  "  -s: list similar names");
+                                  "  -e:   list only exact matchess");
+
+        Command cmd_wait = cli.addCommand("wait", [](cmd* c){
+            debugln("> Paused CLI");
+            cli.pause();
+        });
+        cmd_wait.setDescription("  Wait until scan or attack has finished");
+
+        Command cmd_sleep = cli.addCommand("sleep", [](cmd* c){
+            Command cmd(c);
+
+            timer = millis() + parse_time(cmd.getArg("t").getValue(), 1);
+            cli.pause();
+        });
+        cmd_sleep.addPosArg("t/ime", "");
+        cmd_sleep.setDescription("  Sleep for specified amount of time\r\n"
+                                "  -t: time to sleep");
+
+        Command cmd_ap = cli.addCommand("ap", [](cmd* c) {
+            Command cmd(c);
+
+            String ssid { cmd.getArg("s").getValue() };
+            String pswd { cmd.getArg("p").getValue() };
+            bool hidden { cmd.getArg("h").isSet() };
+            uint8_t channel { (uint8_t)cmd.getArg("ch").getValue().toInt() };
+            uint8_t bssid[6];
+            String bssid_str {cmd.getArg("bssid").getValue()};
+            parse_mac(bssid_str, bssid);
+        
+            ap::start(ssid, pswd, hidden, channel, bssid);
+        });
+        cmd_ap.addPosArg("s/sid");
+        cmd_ap.addPosArg("p/assword","");
+        cmd_ap.addFlagArg("hidden");
+        cmd_ap.addArg("ch/annel","1");
+        cmd_ap.addArg("b/ssid","random");
+        cmd_ap.setDescription("  Start access point\r\n"
+                              "  -s:  SSID network name\r\n"
+                              "  -p:  Password with at least 8 characters\r\n"
+                              "  -h:  Hidden network\r\n"
+                              "  -ch: Channel (default=1)\r\n"
+                              "  -b:  BSSID MAC address (default=random)");
     }
 
     void parse(const char* input) {
@@ -1364,6 +1509,12 @@ namespace cli {
     }
 
     void update() {
+        if(cli.paused() && ((timer == 0 && !scan::active() && !attack::active()) || (timer > 0 && millis() > timer))) {
+            debugln("> Resumed CLI");
+            cli.unpause();
+            timer = 0;
+        }
+
         if (debug_available()) {
             //  String input = debug_read();
             String input;

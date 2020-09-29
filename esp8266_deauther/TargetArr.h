@@ -6,9 +6,9 @@
 
 #pragma once
 
-#include <stdint.h>
-#include <stddef.h>
 #include "config.h"
+#include "AccessPoint.h"
+#include "Station.h"
 
 typedef struct target_t {
     uint8_t  sender[6];
@@ -43,6 +43,8 @@ class TargetArr {
         void clear();
 
         bool add(const uint8_t* sender, const uint8_t* receiver, uint16_t channels);
+        bool add(const AccessPoint* ap);
+        bool add(const Station* st);
 
         void begin();
         const target_t* iterate();

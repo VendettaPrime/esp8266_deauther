@@ -13,6 +13,7 @@
 #include "attack.h"
 #include "alias.h"
 #include "sysh.h"
+#include "ap.h"
 
 #include <ESP8266WiFi.h>
 
@@ -143,6 +144,14 @@ namespace scan {
         st_list.print(filter);
     }
 
+    void print(const result_filter_t* filter) {
+        debuglnF("[ ========== Scan Results ========== ]");
+        debugln();
+
+        if (!filter || filter->aps) printAPs(filter);
+        if (!filter || filter->sts) printSTs(filter);
+    }
+
     void update() {
         update_ap_scan();
         update_st_scan();
@@ -156,5 +165,9 @@ namespace scan {
 
     StationList& getStations() {
         return st_list;
+    }
+
+    bool active(){
+        return ap_scan_active() || st_scan_active() || auth_scan_active()/* || rssi_scan_active()*/;
     }
 }

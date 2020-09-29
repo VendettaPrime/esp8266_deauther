@@ -115,6 +115,7 @@ void startST(const st_scan_settings_t& settings) {
         }
     }
 
+    ap::pause();
     scan::stop();
 
     if (!st_data.settings.retain) st_list.clear();
@@ -133,7 +134,7 @@ void startST(const st_scan_settings_t& settings) {
     }
 
     { // Output
-        debuglnF("[ ===== Station Scan ===== ]");
+        debuglnF("[ ===== Scan for Stations ===== ]");
 
         debugF("Scan time:    ");
         if (st_data.settings.timeout > 0) debugln(strh::time(st_data.settings.timeout));
@@ -155,6 +156,12 @@ void startST(const st_scan_settings_t& settings) {
 
     sysh::set_next_ch(st_data.settings.channels);
 
+    WiFi.persistent(false);
+    WiFi.disconnect(true);
+    WiFi.mode(WIFI_STA);
+    wifi_set_opmode(STATION_MODE);
+
+    wifi_promiscuous_enable(false);
     wifi_set_promiscuous_rx_cb(station_sniffer);
     wifi_promiscuous_enable(true);
 }
@@ -166,10 +173,12 @@ void stopST() {
 
         st_list.printFooter();
 
-        debuglnF("Stopped station scan");
+        debuglnF("> Stopped station scan");
         debugln();
 
-        printSTs();
+        print();
+
+        ap::resume();
     }
 }
 
@@ -190,4 +199,8 @@ void update_st_scan() {
             stopST();
         }
     }
+}
+
+bool st_scan_active() {
+    return st_data.enabled;
 }

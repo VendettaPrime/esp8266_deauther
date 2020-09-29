@@ -37,7 +37,7 @@ typedef struct auth_scan_settings_t {
 
 const st_scan_settings_t   ST_SCAN_DEFAULT { 0x3FFF, 284, 20000, false };
 const ap_scan_settings_t   AP_SCAN_DEFAULT { 0x3FFF, false, false, ST_SCAN_DEFAULT };
-const auth_scan_settings_t AUTH_SCAN_DEFAULT { 0x3FFF, 284, 20000, false, MacArr {} };
+const auth_scan_settings_t AUTH_SCAN_DEFAULT { 0x3FFF, 284, 20000, false, MacArr {}, false };
 
 namespace scan {
     void clearAPresults();
@@ -54,11 +54,14 @@ namespace scan {
     void stopAuth();
     void stop();
 
+    void print(const result_filter_t* filter    = nullptr);
     void printAPs(const result_filter_t* filter = nullptr);
     void printSTs(const result_filter_t* filter = nullptr);
 
     void update();
 
     AccessPointList& getAccessPoints();
-    StationList    & getStations();
+    StationList& getStations();
+
+    bool active();
 }

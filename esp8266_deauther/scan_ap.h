@@ -21,6 +21,7 @@ void startAP(const ap_scan_settings_t& settings) {
         }
     }
 
+    ap::pause();
     scan::stop();
 
     if (!settings.retain) ap_list.clear();
@@ -32,7 +33,7 @@ void startAP(const ap_scan_settings_t& settings) {
     }
 
     { // Output
-        debuglnF("[ ===== Access Point Scan ===== ]");
+        debuglnF("[ ========== Scan for Access Points ========== ]");
 
         debugF("Channels:     ");
         debugln(strh::channels(ap_data.settings.channels));
@@ -53,12 +54,16 @@ void stopAP() {
         WiFi.scanDelete();
         ap_data.enabled = false;
 
-        debuglnF("Stopped access point scan");
+        debuglnF("> Stopped access point scan");
         debugln();
 
-        printAPs();
-
-        if (ap_data.settings.st) startST(ap_data.settings.st_settings);
+        if (ap_data.settings.st) {
+            printAPs();
+            startST(ap_data.settings.st_settings);
+        } else {
+            ap::resume();
+            print();
+        }
     }
 }
 
@@ -81,4 +86,8 @@ void update_ap_scan() {
 
         stopAP();
     }
+}
+
+bool ap_scan_active() {
+    return ap_data.enabled;
 }

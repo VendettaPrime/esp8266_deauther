@@ -51,6 +51,7 @@ namespace alias {
     void clear() {
         list.size      = 0;
         list.magic_num = ALIAS_MAGIC_NUM;
+        save();
     }
 
     void load() {
@@ -86,6 +87,8 @@ namespace alias {
     }
 
     bool add(const uint8_t* mac, const String& name) {
+        if (name.length() == 0) return false;
+
         if ((list.size >= MAX_ALIAS_NUM) ||
             (search(mac) > 0) ||
             (search(name) > 0)) return false;
@@ -134,13 +137,18 @@ namespace alias {
         return getName(id);
     }
 
-    bool resolve(const String& name, uint8_t* buffer) {
+    bool resolve(const String& name, uint8_t* buffer, unsigned int len) {
         int id = search(name);
 
-        if ((id < 0) || (id >= list.size)) return false;
+        if ((id >= 0) && (id < list.size)) {
+            memcpy(buffer, list.data[id].mac, len);
+            return true;
+        } else if (mac::valid(name.c_str(), name.length(), len)) {
+            mac::fromStr(name.c_str(), buffer);
+            return true;
+        }
 
-        memcpy(buffer, list.data[id].mac, 6);
-        return true;
+        return false;
     }
 
     String getName(int id) {

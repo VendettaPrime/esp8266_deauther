@@ -154,7 +154,7 @@ void stopAuth() {
         debuglnF("Ch = 2.4 GHz Channel    ,    RSSI = Signal strength    ,    BSSID = Network MAC address");
         debuglnF("=======================================================================================");
         debugln();
-        debuglnF("Stopped authentication scan");
+        debuglnF("> Stopped authentication scan");
         debugln();
     }
 }
@@ -211,4 +211,8 @@ void update_auth_scan() {
             stopAuth();
         }
     }
+}
+
+bool auth_scan_active() {
+    return auth_data.enabled;
 }

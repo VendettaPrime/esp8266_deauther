@@ -106,9 +106,9 @@ void AccessPoint::setNext(AccessPoint* next) {
 void AccessPoint::print(int id, const result_filter_t* f) {
     if (f) {
         if (((f->channels >> (getChannel()-1)) & 1) == 0) return;
-        if (!f->ssids.empty() && !f->ssids.contains(getSSID())) return;
+        if (!f->ssids.empty() && !f->ssids.contains(getSSID(),false)) return;
         if (!f->bssids.empty() && !f->bssids.contains(getBSSID())) return;
-        if (!f->vendors.empty() && !f->vendors.contains(getVendor())) return;
+        if (!f->vendors.empty() && !f->vendors.contains(getVendor(),false)) return;
     }
 
     debug(strh::right(3, String(id)));
@@ -256,26 +256,36 @@ bool AccessPointList::full() const {
     return list_max_size > 0 && list_size >= list_max_size;
 }
 
-void AccessPointList::print(const result_filter_t* filter) {
-    debugF("Access Point (Network) List: ");
-    debugln(size());
-    debuglnF("-------------------------------");
-
+void AccessPointList::printHeader() {
+    debuglnF("[ ===== Access Points ===== ]");
     debuglnF(" ID SSID (Network Name)                RSSI Mode Ch BSSID (MAC Addr.) Vendor");
     debuglnF("==============================================================================");
+}
 
-    begin();
-    int i = 0;
-
-    while (available()) {
-        iterate()->print(i, filter);
-        ++i;
-    }
-
+void AccessPointList::printFooter() {
     debuglnF("==============================================================================");
     debuglnF("Ch = 2.4 GHz Channel  ,  RSSI = Signal strengh  ,  WPA* = WPA & WPA2 auto mode");
     debuglnF("WPA(2) Enterprise networks are recognized as Open");
     debuglnF("==============================================================================");
 
     debugln();
+}
+
+void AccessPointList::print(const result_filter_t* filter) {
+    if (size() == 0) {
+        debuglnF("No access points found. Type 'scan ap' to search.");
+        debugln();
+    } else {
+        printHeader();
+
+        int i = 0;
+        begin();
+
+        while (available()) {
+            iterate()->print(i, filter);
+            ++i;
+        }
+
+        printFooter();
+    }
 }

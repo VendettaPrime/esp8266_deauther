@@ -1,2 +1,7 @@
+.vscode/*
+build/*
+*.elf
+*.bin
+*.map
 
-save-commands.json
+.DS_Store

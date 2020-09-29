@@ -150,7 +150,7 @@ void stopDeauth() {
         deauth_data.pkts_sent += deauth_data.pkts_per_second;
         deauth_data.settings.targets.clear();
 
-        debugF("Stopped deauth attack. Sent ");
+        debugF("> Stopped deauth attack. Sent ");
         debug(deauth_data.pkts_sent);
         debuglnF(" packets.");
     }
@@ -201,4 +201,8 @@ void update_deauth_attack() {
             deauth_data.settings.targets.begin();
         }
     }
+}
+
+bool deauth_active() {
+    return deauth_data.enabled;
 }
